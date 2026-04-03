@@ -1,0 +1,49 @@
+# Voice-with-RAG Dependencies
+# A voice assistant with RAG capabilities using LiveKit, LangChain, and Google Gemini
+
+# =============================================
+# Core environment
+# =============================================
+python-dotenv>=1.0.0
+
+# =============================================
+# LiveKit voice agent SDK and plugins
+# =============================================
+livekit>=0.10.0
+livekit-agents>=0.8.0
+livekit-plugins-google>=0.6.0
+livekit-plugins-deepgram>=0.6.0
+livekit-plugins-silero>=0.6.0
+
+# =============================================
+# LangChain RAG stack
+# =============================================
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-core>=0.2.0
+langchain-text-splitters>=0.2.0
+langchain-huggingface>=0.0.3
+
+# =============================================
+# Embeddings and vector store
+# =============================================
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.4
+
+# =============================================
+# LLM provider
+# =============================================
+google-generativeai>=0.5.0
+
+# =============================================
+# Document processing
+# =============================================
+pypdf>=4.0.0
+
+# =============================================
+# Transitive dependencies (pinned for stability)
+# =============================================
+numpy>=1.24.0
+aiohttp>=3.9.0
+requests>=2.31.0
+tqdm>=4.65.0
