@@ -1,8 +1,10 @@
 # rag_engine.py
 
 import os
+import json
+import sys
 from dotenv import load_dotenv
-import google.generativeai as genai
+import boto3
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -23,27 +25,58 @@ _rag_chain_cache = None
 _rag_lock = threading.Lock()
 VECTOR_STORE_PATH = "data/faiss_index"  # Persistent vector store location
 
-# Custom LangChain wrapper for Google Generative AI
-class GoogleGenerativeAILLM(BaseLLM):
-    """LangChain-compatible wrapper for Google Generative AI"""
-    model_name: str = "gemini-flash-latest"
+# Custom LangChain wrapper for AWS Bedrock Claude
+class BedrockLLM(BaseLLM):
+    """LangChain-compatible wrapper for AWS Bedrock (Claude models)"""
+    model_id: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     temperature: float = 0.2
-    api_key: Optional[str] = None
+    region: str = "us-east-1"
     
-    def __init__(self, model_name: str = "gemini-flash-latest", temperature: float = 0.2, api_key: Optional[str] = None):
+    def __init__(self, model_id: Optional[str] = None, temperature: float = 0.2, region: str = "us-east-1"):
         super().__init__()
-        self.model_name = model_name
+        self.model_id = model_id or os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
         self.temperature = temperature
-        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
-        if not self.api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
-        genai.configure(api_key=self.api_key)
-        # Use object.__setattr__ to bypass Pydantic v2 validation
-        object.__setattr__(self, '_model', genai.GenerativeModel(self.model_name))
+        self.region = region
+        
+        # Initialize Bedrock client (will use AWS SSO credentials from environment/CLI)
+        try:
+            object.__setattr__(self, '_client', boto3.client('bedrock-runtime', region_name=self.region))
+        except Exception as e:
+            raise ValueError(
+                f"Failed to initialize Bedrock client: {e}\n"
+                "Ensure AWS credentials are configured. Run: aws sso login --profile <your-profile>"
+            )
     
     @property
     def _llm_type(self) -> str:
-        return "google_generative_ai"
+        return "bedrock_claude"
+    
+    def _call_bedrock_model(self, prompt: str) -> str:
+        """Call Claude model via AWS Bedrock."""
+        try:
+            response = self._client.invoke_model(
+                modelId=self.model_id,
+                contentType='application/json',
+                accept='application/json',
+                body=json.dumps({
+                    'anthropic_version': 'bedrock-2023-05-31',
+                    'max_tokens': 2048,
+                    'temperature': self.temperature,
+                    'messages': [
+                        {
+                            'role': 'user',
+                            'content': prompt
+                        }
+                    ]
+                })
+            )
+            
+            response_body = json.loads(response['body'].read())
+            return response_body['content'][0]['text']
+        
+        except Exception as e:
+            print(f"Error: Failed to call Bedrock model: {e}")
+            sys.exit(1)
     
     def _generate(
         self,
@@ -55,14 +88,8 @@ class GoogleGenerativeAILLM(BaseLLM):
         """Generate responses for the given prompts."""
         generations = []
         for prompt in prompts:
-            generation_config = genai.types.GenerationConfig(
-                temperature=self.temperature,
-            )
-            response = self._model.generate_content(
-                prompt,
-                generation_config=generation_config
-            )
-            generations.append([Generation(text=response.text)])
+            text = self._call_bedrock_model(prompt)
+            generations.append([Generation(text=text)])
         
         return LLMResult(generations=generations)
     
@@ -74,14 +101,7 @@ class GoogleGenerativeAILLM(BaseLLM):
         **kwargs: Any,
     ) -> str:
         """Call the LLM with a single prompt."""
-        generation_config = genai.types.GenerationConfig(
-            temperature=self.temperature,
-        )
-        response = self._model.generate_content(
-            prompt,
-            generation_config=generation_config
-        )
-        return response.text
+        return self._call_bedrock_model(prompt)
 
 def initialize_rag(use_cache=True, force_rebuild=False):
     """
@@ -137,16 +157,15 @@ def initialize_rag(use_cache=True, force_rebuild=False):
     
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
-    # Connect to Gemini for retrieval-based answering
-    print("🤖 [RAG] Initializing LLM...")
-    # Use gemini-flash-latest (or gemini-2.5-flash for stable version)
-    model_name = "gemini-flash-latest"
-    llm = GoogleGenerativeAILLM(
-        model_name=model_name,
+    # Connect to Bedrock Claude for retrieval-based answering
+    print("🤖 [RAG] Initializing LLM (AWS Bedrock)...")
+    model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
+    llm = BedrockLLM(
+        model_id=model_id,
         temperature=0.2,
-        api_key=os.getenv("GOOGLE_API_KEY")
+        region="us-east-1"
     )
-    print(f"✅ [RAG] LLM initialized with model: {model_name}")
+    print(f"✅ [RAG] LLM initialized with Bedrock model: {model_id}")
 
     # Create prompt template - STRICT: Only answer from knowledge base
     prompt_template = PromptTemplate(
