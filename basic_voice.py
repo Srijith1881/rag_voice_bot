@@ -2,7 +2,8 @@ import os
 from dotenv import load_dotenv
 from livekit import agents
 from livekit.agents import Agent, AgentSession
-from livekit.plugins import google, silero, deepgram
+from livekit.plugins import silero, deepgram
+from bedrock_llm import BedrockLLM
 from rag_engine import get_rag_chain
 
 # Suppress HuggingFace tokenizers parallelism warnings
@@ -47,9 +48,8 @@ async def entrypoint(ctx: agents.JobContext):
             model="nova-2",
             api_key=os.getenv("DEEPGRAM_API_KEY"),
         ),
-        llm=google.LLM(
-            model="gemini-2.5-flash-lite",
-            api_key=os.getenv("GOOGLE_API_KEY"),
+        llm=BedrockLLM(
+            model_id=os.getenv("BEDROCK_MODEL_ID"),
         ),
         tts=deepgram.TTS(
             model="aura-asteria-en",
